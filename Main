@@ -1,34 +1,34 @@
-// Create a custom menu to allow manual toggling
+// Adds custom menu to trigger the script
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('Search Similar Values')
-    .addItem('Search in Columns', 'promptUserInput')
+    .addItem('Find Similar Values', 'promptUserInput')
     .addToUi();
 }
 
-// Prompt the user to input the range (columns and rows)
+// Prompt user for input (columns and rows to search)
 function promptUserInput() {
   var ui = SpreadsheetApp.getUi();
-  
   var response = ui.prompt(
     'Search Similar Values',
-    'Enter column letters (e.g., A,B,C) and row range (e.g., 2-50) like this: A,B,C,2,50',
-    ui.ButtonSet.OK_CANCEL);
+    'Enter columns (e.g., A,B,C) and row range (e.g., 2-50) like this: A,B,C,2,50',
+    ui.ButtonSet.OK_CANCEL
+  );
   
   if (response.getSelectedButton() == ui.Button.OK) {
     var input = response.getResponseText();
     var parts = input.split(',');
     
     if (parts.length >= 3) {
-      // Extract multiple column letters
-      var columns = parts.slice(0, -2).map(function(col) { return col.trim().toUpperCase(); });
+      // Parse user input into columns and row range
+      var columns = parts.slice(0, -2).map(col => col.trim().toUpperCase());
       var startRow = parseInt(parts[parts.length - 2], 10);
       var endRow = parseInt(parts[parts.length - 1], 10);
       
       if (isNaN(startRow) || isNaN(endRow) || !columns.every(col => col.match(/[A-Z]/))) {
         ui.alert('Invalid input format. Please try again.');
       } else {
-        searchSimilarValuesInColumns(columns, startRow, endRow);
+        findSimilarValues(columns, startRow, endRow);
       }
     } else {
       ui.alert('Invalid input format. Please try again.');
@@ -36,51 +36,94 @@ function promptUserInput() {
   }
 }
 
-// Function to search for similar numerical values in specified columns
-function searchSimilarValuesInColumns(columns, startRow, endRow) {
+// Core function to search for similar numerical and textual values and highlight rows
+function findSimilarValues(columns, startRow, endRow) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  var tolerance = 0.05; // Tolerance for similarity (e.g., 5% difference allowed)
-  var similarPairs = [];
-
-  // Loop through each column specified
-  columns.forEach(function(column) {
-    var range = sheet.getRange(column + startRow + ':' + column + endRow);
-    var values = range.getValues();
+  var tolerance = 0.05; // Tolerance for numerical similarity (5%)
+  var similarityThreshold = 0.75; // Threshold for text similarity (75%)
+  var highlightedRows = {}; // Store rows to highlight to avoid duplicate highlights
+  
+  // Iterate over all specified columns
+  for (var c = 0; c < columns.length; c++) {
+    var columnLetter = columns[c];
+    var range = sheet.getRange(columnLetter + startRow + ':' + columnLetter + endRow);
+    var values = range.getValues().flat(); // Flatten the array
     
+    // Compare each row's value with every other row's value
     for (var i = 0; i < values.length; i++) {
-      var currentValue = values[i][0];
-      
-      if (typeof currentValue === 'number') {
-        for (var j = i + 1; j < values.length; j++) {
-          var compareValue = values[j][0];
-          
-          if (typeof compareValue === 'number') {
-            var difference = Math.abs(currentValue - compareValue) / currentValue;
-            
-            if (difference <= tolerance) {
-              similarPairs.push({
-                column: column,
-                row1: startRow + i,
-                row2: startRow + j,
-                value1: currentValue,
-                value2: compareValue
-              });
-            }
+      for (var j = i + 1; j < values.length; j++) {
+        var value1 = values[i];
+        var value2 = values[j];
+        
+        // Compare numerical values
+        if (typeof value1 === 'number' && typeof value2 === 'number') {
+          var difference = Math.abs(value1 - value2) / Math.max(value1, value2); 
+          if (difference <= tolerance) {
+            highlightRow(sheet, startRow + i, 'yellow');
+            highlightRow(sheet, startRow + j, 'yellow');
+            highlightedRows[startRow + i] = true;
+            highlightedRows[startRow + j] = true;
+          }
+        }
+
+        // Compare text values
+        else if (typeof value1 === 'string' && typeof value2 === 'string') {
+          var similarity = stringSimilarity(value1, value2);
+          if (similarity >= similarityThreshold) {
+            highlightRow(sheet, startRow + i, 'lightgreen');
+            highlightRow(sheet, startRow + j, 'lightgreen');
+            highlightedRows[startRow + i] = true;
+            highlightedRows[startRow + j] = true;
           }
         }
       }
     }
-  });
+  }
 
-  if (similarPairs.length > 0) {
-    var message = 'Found similar values:\n';
-    similarPairs.forEach(function(pair) {
-      message += 'Column ' + pair.column + ': Row ' + pair.row1 + 
-                 ' and Row ' + pair.row2 + ' have similar values: ' + 
-                 pair.value1 + ' and ' + pair.value2 + '\n';
-    });
-    SpreadsheetApp.getUi().alert(message);
-  } else {
+  // If no rows were highlighted, alert the user
+  if (Object.keys(highlightedRows).length === 0) {
     SpreadsheetApp.getUi().alert('No similar values found.');
   }
+}
+
+// Function to highlight a specific row with a given color
+function highlightRow(sheet, rowNumber, color) {
+  var range = sheet.getRange(rowNumber + ':' + rowNumber); // Select the entire row
+  range.setBackground(color); // Highlight the row
+}
+
+// Helper function to calculate string similarity based on Levenshtein distance
+function stringSimilarity(str1, str2) {
+  var distance = levenshteinDistance(str1.toLowerCase(), str2.toLowerCase());
+  var maxLength = Math.max(str1.length, str2.length);
+  return (maxLength - distance) / maxLength;
+}
+
+// Levenshtein distance function (edit distance between two strings)
+function levenshteinDistance(s, t) {
+  var d = [];
+  
+  for (var i = 0; i <= s.length; i++) {
+    d[i] = [i];
+  }
+  
+  for (var j = 1; j <= t.length; j++) {
+    d[0][j] = j;
+  }
+  
+  for (var i = 1; i <= s.length; i++) {
+    for (var j = 1; j <= t.length; j++) {
+      if (s[i - 1] === t[j - 1]) {
+        d[i][j] = d[i - 1][j - 1];
+      } else {
+        d[i][j] = Math.min(
+          d[i - 1][j] + 1,    // Deletion
+          d[i][j - 1] + 1,    // Insertion
+          d[i - 1][j - 1] + 1 // Substitution
+        );
+      }
+    }
+  }
+  
+  return d[s.length][t.length];
 }
