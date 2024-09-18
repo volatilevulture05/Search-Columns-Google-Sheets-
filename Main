@@ -1,0 +1,86 @@
+// Create a custom menu to allow manual toggling
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('Search Similar Values')
+    .addItem('Search in Columns', 'promptUserInput')
+    .addToUi();
+}
+
+// Prompt the user to input the range (columns and rows)
+function promptUserInput() {
+  var ui = SpreadsheetApp.getUi();
+  
+  var response = ui.prompt(
+    'Search Similar Values',
+    'Enter column letters (e.g., A,B,C) and row range (e.g., 2-50) like this: A,B,C,2,50',
+    ui.ButtonSet.OK_CANCEL);
+  
+  if (response.getSelectedButton() == ui.Button.OK) {
+    var input = response.getResponseText();
+    var parts = input.split(',');
+    
+    if (parts.length >= 3) {
+      // Extract multiple column letters
+      var columns = parts.slice(0, -2).map(function(col) { return col.trim().toUpperCase(); });
+      var startRow = parseInt(parts[parts.length - 2], 10);
+      var endRow = parseInt(parts[parts.length - 1], 10);
+      
+      if (isNaN(startRow) || isNaN(endRow) || !columns.every(col => col.match(/[A-Z]/))) {
+        ui.alert('Invalid input format. Please try again.');
+      } else {
+        searchSimilarValuesInColumns(columns, startRow, endRow);
+      }
+    } else {
+      ui.alert('Invalid input format. Please try again.');
+    }
+  }
+}
+
+// Function to search for similar numerical values in specified columns
+function searchSimilarValuesInColumns(columns, startRow, endRow) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var tolerance = 0.05; // Tolerance for similarity (e.g., 5% difference allowed)
+  var similarPairs = [];
+
+  // Loop through each column specified
+  columns.forEach(function(column) {
+    var range = sheet.getRange(column + startRow + ':' + column + endRow);
+    var values = range.getValues();
+    
+    for (var i = 0; i < values.length; i++) {
+      var currentValue = values[i][0];
+      
+      if (typeof currentValue === 'number') {
+        for (var j = i + 1; j < values.length; j++) {
+          var compareValue = values[j][0];
+          
+          if (typeof compareValue === 'number') {
+            var difference = Math.abs(currentValue - compareValue) / currentValue;
+            
+            if (difference <= tolerance) {
+              similarPairs.push({
+                column: column,
+                row1: startRow + i,
+                row2: startRow + j,
+                value1: currentValue,
+                value2: compareValue
+              });
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (similarPairs.length > 0) {
+    var message = 'Found similar values:\n';
+    similarPairs.forEach(function(pair) {
+      message += 'Column ' + pair.column + ': Row ' + pair.row1 + 
+                 ' and Row ' + pair.row2 + ' have similar values: ' + 
+                 pair.value1 + ' and ' + pair.value2 + '\n';
+    });
+    SpreadsheetApp.getUi().alert(message);
+  } else {
+    SpreadsheetApp.getUi().alert('No similar values found.');
+  }
+}
